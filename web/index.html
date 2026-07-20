@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Phoenix to Koinly Converter</title>
+    <title>Phoenix and Xapo to Koinly Converter</title>
     <link rel="stylesheet" href="style.css">
     <script src="wasm_exec.js"></script>
     <script src="app.js" defer></script>
@@ -13,19 +13,25 @@
 <body>
     <div class="container">
         <header>
-            <h1>Phoenix to Koinly Converter</h1>
-            <p>Convert your Phoenix Wallet CSV exports to Koinly-compatible format entirely in your browser.</p>
+            <h1>Phoenix and Xapo to Koinly Converter</h1>
+            <p>Convert Phoenix Wallet or Xapo CSV exports to Koinly-compatible format entirely in your browser.</p>
         </header>
 
         <main>
             <div class="upload-area" id="drop-zone">
                 <input type="file" id="file-input" accept=".csv" hidden>
                 <div class="icon">📂</div>
-                <p>Drag & Drop your <strong>phoenix.csv</strong> here</p>
+                <p id="upload-prompt">Drag & Drop your <strong>Phoenix CSV</strong> here</p>
                 <p class="small">or click to browse</p>
             </div>
 
             <div class="options">
+                <div class="source-group" role="radiogroup" aria-label="Statement type">
+                    <input type="radio" id="phoenix-source" name="source" value="phoenix" checked>
+                    <label for="phoenix-source">Phoenix (one export)</label>
+                    <input type="radio" id="xapo-source" name="source" value="xapo">
+                    <label for="xapo-source">Xapo USD/BTC (select all account and interest exports)</label>
+                </div>
                 <div class="checkbox-group">
                     <input type="checkbox" id="rounding-checkbox">
                     <label for="rounding-checkbox">Adjust for rounding differences (adds a cost transaction)</label>
