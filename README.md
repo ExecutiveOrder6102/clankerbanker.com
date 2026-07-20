@@ -5,10 +5,38 @@ This project converts transaction data exported from the Phoenix Bitcoin Lightni
 ## Features
 
 - Converts Phoenix transaction types (lightning_received, lightning_sent, swap_in, swap_out, channel_open, channel_close) into Koinly-compatible records.
+- Consolidates Xapo BTC, USD, and BTC-interest statements into one Koinly CSV.
 - Handles amount conversions from millisats to BTC.
 - CLI mode for converting CSV exports on your machine.
 - In-browser converter (WASM) that runs entirely client-side with drag-and-drop upload and a downloadable `koinly.csv` output.
 - Verbose logging flag for additional insight when debugging CLI runs.
+
+## OpenCode workflow
+
+If you are using OpenCode, this repo works best with a quick orientation pass followed by focused edits.
+
+See `OPENCODE.md` for a one-page quickstart.
+
+**Repo map**
+
+- `main.go`: CLI entry point and conversion logic.
+- `converter/`: parsing and conversion helpers.
+- `cmd/wasm/`: WebAssembly entry point.
+- `web/`: static UI and built WASM assets.
+
+**Task recipes**
+
+```bash
+go run main.go <path_to_phoenix_csv_file>
+make build-cli
+make build-wasm
+```
+
+**Multi-agent prompts (examples)**
+
+- "Explore conversion logic and list entry points for adding a new Phoenix transaction type."
+- "Find where WASM bundles are built and update docs if the build steps change."
+- "Add a new transaction type with tests; keep changes in converter/ and main.go consistent."
 
 ## Usage
 
@@ -28,6 +56,16 @@ go run main.go -v phoenix_transactions.csv
 
 This generates `koinly.csv`, which you can import into Koinly.
 
+### Xapo statements
+
+Use `-xapo` followed by every Xapo statement in the export period (for example, BTC account, USD account, and BTC interest). The converter writes one consolidated `koinly.csv`.
+
+```bash
+go run main.go -xapo BTC_account.csv USD_account.csv BTC_interest.csv
+```
+
+Xapo's `Exchange USD to BTC` activity is represented in separate BTC and USD statement rows. When their transaction timestamp and sub-description match, the converter emits one trade: USD sent and BTC received. A `Move to Savings` row is imported as a USD-to-BTC trade only when it came from a `USD_account` statement and has both an explicit BTC `Amount` and a `USD Amount`. The similarly shaped row in a `BTC_account` statement, and rows from an unrecognised filename, are omitted as internal or ambiguous transfers. Keep Xapo's original filenames when importing. Daily BTC interest is marked `lending interest` without a fiat value, allowing Koinly to price it. For every non-BTC row, the converter uses Xapo's settled `USD Amount` as a USD movement; BTC rows use their explicit BTC `Amount`. The original Xapo action, counterparty, and sub-description—including any GBP or USDC reference—are retained in the Koinly description. Other received and outgoing account movements are mapped to deposits and withdrawals, and subscription fees to costs.
+
 ### In-browser converter (WASM)
 
 The `web/` directory contains a drag-and-drop interface that converts Phoenix exports entirely in your browser. Build the WebAssembly bundle and serve the static files locally:
@@ -38,7 +76,7 @@ cd web
 python -m http.server 8000
 ```
 
-Open http://localhost:8000 in your browser, drop your Phoenix CSV export, and download the generated `koinly.csv` file. No data leaves your device.
+Open http://localhost:8000 in your browser, choose Phoenix or Xapo, then drop your export(s) and download the generated `koinly.csv` file. Choose Xapo to select multiple account and interest CSVs for a consolidated import. No data leaves your device.
 
 ### Verbose Logging
 
