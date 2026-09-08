@@ -122,6 +122,52 @@ func TestConvertXapoConsolidatesStatements(t *testing.T) {
 	}
 }
 
+func TestConvertXapoConsolidatesBTCToUSDCardSpending(t *testing.T) {
+	btcAccount := `Processing Date/Time,Transaction Date/Time,Action Taken,Currency,Amount,BTC Spot/FX,USD Amount,Counterparty,Sub Description
+2030-03-05 12:00:00,2030-03-05 12:00:00,Exchange BTC to USD,BTC,-0.00025000,60000.00,-15.00,,BTC 0.00025000 exchanged
+`
+	usdAccount := `Processing Date/Time,Transaction Date/Time,Action Taken,Currency,Amount,BTC Spot/FX,USD Amount,Counterparty,Sub Description
+2030-03-05 12:00:06,2030-03-05 12:00:04,Card ···· 1234 transaction,GBP,-12.00,1.25,-15.00,Example Merchant,GBP 12.00 charged
+2030-03-05 12:00:00,2030-03-05 12:00:00,Exchange BTC to USD,BTC,0.00025000,60000.00,15.00,,BTC 0.00025000 exchanged
+`
+
+	var output bytes.Buffer
+	err := ConvertXapoStatements([]XapoStatement{
+		{Name: "BTC_account_sample.csv", Reader: strings.NewReader(btcAccount)},
+		{Name: "USD_account_sample.csv", Reader: strings.NewReader(usdAccount)},
+	}, &output)
+	if err != nil {
+		t.Fatalf("ConvertXapoStatements returned an error: %v", err)
+	}
+
+	rows, err := csv.NewReader(&output).ReadAll()
+	if err != nil {
+		t.Fatalf("reading converted CSV: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected header plus BTC-to-USD trade and card payment, got %#v", rows)
+	}
+
+	var exchange, cardPayment []string
+	for _, row := range rows[1:] {
+		switch {
+		case row[2] == "BTC" && row[4] == "USD":
+			exchange = row
+		case row[2] == "USD" && row[9] == "payment":
+			cardPayment = row
+		}
+	}
+	if exchange == nil || exchange[1] != "0.00025000" || exchange[3] != "15.00000000" {
+		t.Errorf("expected consolidated BTC-to-USD exchange, got %#v", exchange)
+	}
+	if cardPayment == nil || cardPayment[1] != "15.00000000" ||
+		!strings.Contains(cardPayment[10], "Card ···· 1234 transaction") ||
+		!strings.Contains(cardPayment[10], "Example Merchant") ||
+		!strings.Contains(cardPayment[10], "GBP 12.00 charged") {
+		t.Errorf("expected USD card payment with original context, got %#v", cardPayment)
+	}
+}
+
 func TestToXapoKoinlyRecordOnlyConvertsUSDSavingsStatement(t *testing.T) {
 	record := &XapoRecord{
 		Timestamp:      time.Date(2030, time.February, 4, 20, 5, 8, 0, time.UTC),
