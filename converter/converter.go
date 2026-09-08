@@ -336,13 +336,13 @@ func CreateXapoKoinlyCSV(records []*XapoRecord, w io.Writer) error {
 	return writer.Error()
 }
 
-// ToXapoKoinlyRecords maps Xapo statement rows into Koinly rows. A Xapo
-// USD-to-BTC exchange appears twice (a BTC receipt and a USD debit), so the
-// matching legs are merged into one trade before the remaining rows are mapped.
+// ToXapoKoinlyRecords maps Xapo statement rows into Koinly rows. Xapo exchanges
+// appear twice (a BTC-account leg and a USD-account leg), so matching legs are
+// merged into one trade before the remaining rows are mapped.
 func ToXapoKoinlyRecords(records []*XapoRecord) []*KoinlyRecord {
 	groups := make(map[string][]int)
 	for i, record := range records {
-		if isXapoUSDToBTCExchange(record) {
+		if isXapoExchange(record) {
 			groups[xapoExchangeKey(record)] = append(groups[xapoExchangeKey(record)], i)
 		}
 	}
@@ -350,31 +350,14 @@ func ToXapoKoinlyRecords(records []*XapoRecord) []*KoinlyRecord {
 	matched := make(map[int]bool)
 	var output []*KoinlyRecord
 	for _, indexes := range groups {
-		btcIndex, usdIndex := -1, -1
-		for _, index := range indexes {
-			record := records[index]
-			if record.HasAmount && record.Currency == "BTC" && record.Amount > 0 {
-				btcIndex = index
-			}
-			if record.HasUSDAmount && record.USDAmount < 0 {
-				usdIndex = index
-			}
-		}
-		if btcIndex == -1 || usdIndex == -1 {
+		exchange, exchangeIndexes := xapoExchangeTrade(records, indexes)
+		if exchange == nil {
 			continue
 		}
-		btc := records[btcIndex]
-		usd := records[usdIndex]
-		output = append(output, &KoinlyRecord{
-			Date:             btc.Timestamp.Format(KoinlyDateFormat),
-			SentAmount:       formatXapoAmount(math.Abs(usd.USDAmount), "USD"),
-			SentCurrency:     "USD",
-			ReceivedAmount:   formatXapoAmount(btc.Amount, "BTC"),
-			ReceivedCurrency: "BTC",
-			Description:      xapoDescription(btc),
-		})
-		matched[btcIndex] = true
-		matched[usdIndex] = true
+		output = append(output, exchange)
+		for _, index := range exchangeIndexes {
+			matched[index] = true
+		}
 	}
 
 	for i, record := range records {
@@ -433,6 +416,10 @@ func ToXapoKoinlyRecord(record *XapoRecord) *KoinlyRecord {
 		koinlyRecord.Label = "cost"
 		return koinlyRecord
 	}
+	if isXapoCardTransaction(action) && amount < 0 {
+		setXapoMovement(koinlyRecord, amount, currency, "payment")
+		return koinlyRecord
+	}
 	if strings.Contains(action, "transfer to") {
 		setXapoMovement(koinlyRecord, amount, currency, "withdrawal")
 		return koinlyRecord
@@ -467,12 +454,69 @@ func xapoMovementAmount(record *XapoRecord) (string, float64, bool) {
 	return "", 0, false
 }
 
-func isXapoUSDToBTCExchange(record *XapoRecord) bool {
-	return strings.EqualFold(strings.TrimSpace(record.Action), "Exchange USD to BTC")
+func xapoExchangeTrade(records []*XapoRecord, indexes []int) (*KoinlyRecord, []int) {
+	if len(indexes) == 0 {
+		return nil, nil
+	}
+
+	action := strings.ToLower(strings.TrimSpace(records[indexes[0]].Action))
+	btcIndex, usdIndex := -1, -1
+	for _, index := range indexes {
+		record := records[index]
+		switch action {
+		case "exchange usd to btc":
+			if record.HasAmount && record.Currency == "BTC" && record.Amount > 0 {
+				btcIndex = index
+			}
+			if record.HasUSDAmount && record.USDAmount < 0 {
+				usdIndex = index
+			}
+		case "exchange btc to usd":
+			if record.HasAmount && record.Currency == "BTC" && record.Amount < 0 {
+				btcIndex = index
+			}
+			if record.HasUSDAmount && record.USDAmount > 0 {
+				usdIndex = index
+			}
+		}
+	}
+	if btcIndex == -1 || usdIndex == -1 {
+		return nil, nil
+	}
+
+	btc := records[btcIndex]
+	usd := records[usdIndex]
+	trade := &KoinlyRecord{
+		Date:        btc.Timestamp.Format(KoinlyDateFormat),
+		Description: xapoDescription(btc),
+	}
+	if action == "exchange usd to btc" {
+		trade.SentAmount = formatXapoAmount(math.Abs(usd.USDAmount), "USD")
+		trade.SentCurrency = "USD"
+		trade.ReceivedAmount = formatXapoAmount(math.Abs(btc.Amount), "BTC")
+		trade.ReceivedCurrency = "BTC"
+	} else {
+		trade.SentAmount = formatXapoAmount(math.Abs(btc.Amount), "BTC")
+		trade.SentCurrency = "BTC"
+		trade.ReceivedAmount = formatXapoAmount(math.Abs(usd.USDAmount), "USD")
+		trade.ReceivedCurrency = "USD"
+	}
+	return trade, []int{btcIndex, usdIndex}
+}
+
+func isXapoExchange(record *XapoRecord) bool {
+	action := strings.ToLower(strings.TrimSpace(record.Action))
+	return action == "exchange usd to btc" || action == "exchange btc to usd"
+}
+
+func isXapoCardTransaction(action string) bool {
+	return strings.Contains(action, "card") && strings.Contains(action, "transaction")
 }
 
 func xapoExchangeKey(record *XapoRecord) string {
-	return record.Timestamp.UTC().Format(time.RFC3339Nano) + "|" + strings.ToLower(strings.TrimSpace(record.SubDescription))
+	return record.Timestamp.UTC().Format(time.RFC3339Nano) + "|" +
+		strings.ToLower(strings.TrimSpace(record.Action)) + "|" +
+		strings.ToLower(strings.TrimSpace(record.SubDescription))
 }
 
 func xapoDescription(record *XapoRecord) string {
