@@ -1,11 +1,10 @@
 # OpenCode Quickstart
 
-This repo is a Go utility for converting Phoenix wallet CSV exports into Koinly CSV output. It supports both a CLI and a WebAssembly-powered browser UI.
+This repo is clankerbanker.com, a web-only app for converting Phoenix Wallet and Xapo CSV exports into Koinly CSV output. Go conversion code runs entirely in the browser through WebAssembly and can be hosted locally.
 
 ## Repo map
 
-- `main.go`: CLI entry point and conversion logic.
-- `converter/`: parsing and conversion helpers.
+- `converter/`: parsing, conversion helpers, and regression tests for Phoenix and Xapo.
 - `cmd/wasm/`: WebAssembly entry point.
 - `web/`: static UI and built WASM assets.
 - `testdata/`: sample Phoenix CSVs used in tests.
@@ -13,9 +12,9 @@ This repo is a Go utility for converting Phoenix wallet CSV exports into Koinly 
 ## Task recipes
 
 ```bash
-go run main.go <path_to_phoenix_csv_file>
-make build-cli
-make build-wasm
+make test    # Run the Go regression tests
+make build   # Build the static WASM bundle
+make serve   # Build and serve locally at http://localhost:8000
 ```
 
 ## Multi-agent workflow

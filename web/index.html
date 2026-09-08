@@ -4,7 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Phoenix and Xapo to Koinly Converter</title>
+    <title>clankerbanker.com — CSV to Koinly</title>
+    <meta name="description" content="Open-source CSV conversion for Koinly. Convert locally in your browser, supporting Phoenix Wallet and Xapo exports.">
     <link rel="stylesheet" href="style.css">
     <script src="wasm_exec.js"></script>
     <script src="app.js" defer></script>
@@ -13,12 +14,13 @@
 <body>
     <div class="container">
         <header>
-            <h1>Phoenix and Xapo to Koinly Converter</h1>
-            <p>Convert Phoenix Wallet or Xapo CSV exports to Koinly-compatible format entirely in your browser.</p>
+            <h1>clankerbanker.com</h1>
+            <p>Your CSV exports, ready for Koinly. Open source and processed entirely in your browser.</p>
         </header>
 
         <main>
-            <div class="upload-area" id="drop-zone">
+            <p>Currently supported: <strong>Phoenix Wallet and Xapo</strong>. More CSV formats are planned.</p>
+            <div class="upload-area" id="drop-zone" role="button" tabindex="0" aria-label="Choose a Phoenix Wallet CSV file">
                 <input type="file" id="file-input" accept=".csv" hidden>
                 <div class="icon">📂</div>
                 <p id="upload-prompt">Drag & Drop your <strong>Phoenix CSV</strong> here</p>
@@ -38,7 +40,7 @@
                 </div>
             </div>
 
-            <div id="status" class="status hidden"></div>
+            <div id="status" class="status" role="status" aria-live="polite">Loading converter…</div>
 
             <div id="result-area" class="hidden">
                 <button id="download-btn" class="primary-btn">Download koinly.csv</button>
@@ -47,7 +49,7 @@
 
         <footer>
             <p>Runs locally. No data leaves your device.</p>
-            <p>Don't trust me? Good! Check the <a href="https://github.com/ExecutiveOrder6102/phoenix-koinly-converter"
+            <p>Don't trust me? Good! Check the <a href="https://github.com/ExecutiveOrder6102/clankerbanker.com"
                     target="_blank" rel="noopener noreferrer">repo</a> and run it yourself!</p>
         </footer>
     </div>
