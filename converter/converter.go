@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"math"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,9 +22,22 @@ const (
 	msatsPerSat       = 1000
 )
 
-var (
-	Verbose bool
-)
+var koinlyHeader = []string{
+	"Date",
+	"Sent Amount",
+	"Sent Currency",
+	"Received Amount",
+	"Received Currency",
+	"Fee Amount",
+	"Fee Currency",
+	"Net Worth Amount",
+	"Net Worth Currency",
+	"Label",
+	"Description",
+	"TxHash",
+}
+
+var Verbose bool
 
 // KoinlyRecord represents a single row in the Koinly CSV file.
 type KoinlyRecord struct {
@@ -49,6 +64,45 @@ type PhoenixRecord struct {
 	ServiceFeeMsat  int64
 	TransactionID   string
 	Description     string
+}
+
+// XapoRecord represents a row from a Xapo account or interest statement.
+// Xapo leaves some Amount cells blank, so HasAmount and HasUSDAmount retain
+// the distinction between a blank value and a genuine zero value.
+type XapoRecord struct {
+	Timestamp      time.Time
+	Action         string
+	Currency       string
+	Amount         float64
+	HasAmount      bool
+	USDAmount      float64
+	HasUSDAmount   bool
+	BTCSpotFX      float64
+	HasBTCSpotFX   bool
+	Counterparty   string
+	SubDescription string
+	StatementName  string
+	StatementKind  XapoStatementKind
+}
+
+// XapoStatementKind identifies the type of Xapo statement that supplied a
+// record. Xapo account CSV rows use the same shape, so this comes from the
+// source filename rather than the row itself.
+type XapoStatementKind string
+
+const (
+	XapoUnknownStatement     XapoStatementKind = "unknown"
+	XapoUSDAccountStatement  XapoStatementKind = "usd_account"
+	XapoBTCAccountStatement  XapoStatementKind = "btc_account"
+	XapoBTCInterestStatement XapoStatementKind = "btc_interest"
+)
+
+// XapoStatement pairs a statement reader with its original filename. The
+// filename is needed to distinguish otherwise-identical USD and BTC account
+// records such as "Move to Savings".
+type XapoStatement struct {
+	Name   string
+	Reader io.Reader
 }
 
 // ParseIntField parses an integer field with commas.
@@ -82,6 +136,37 @@ func Convert(r io.Reader, w io.Writer, addRoundingCost bool) error {
 
 	if err := CreateKoinlyCSV(phoenixRecords, w, addRoundingCost); err != nil {
 		return fmt.Errorf("creating koinly csv: %w", err)
+	}
+	return nil
+}
+
+// ConvertXapo converts and consolidates one or more Xapo statements into a
+// single Koinly CSV. The statements may be BTC, USD, or BTC-interest exports.
+func ConvertXapo(readers []io.Reader, w io.Writer) error {
+	statements := make([]XapoStatement, 0, len(readers))
+	for _, reader := range readers {
+		statements = append(statements, XapoStatement{Reader: reader})
+	}
+	return ConvertXapoStatements(statements, w)
+}
+
+// ConvertXapoStatements converts and consolidates Xapo statements while
+// retaining their original filenames for source-aware transaction handling.
+func ConvertXapoStatements(statements []XapoStatement, w io.Writer) error {
+	var records []*XapoRecord
+	for i, statement := range statements {
+		if statement.Reader == nil {
+			return fmt.Errorf("reading xapo csv %d: nil reader", i+1)
+		}
+		statementRecords, err := ReadXapoCSVWithSource(statement.Reader, statement.Name)
+		if err != nil {
+			return fmt.Errorf("reading xapo csv %d: %w", i+1, err)
+		}
+		records = append(records, statementRecords...)
+	}
+
+	if err := CreateXapoKoinlyCSV(records, w); err != nil {
+		return fmt.Errorf("creating xapo koinly csv: %w", err)
 	}
 	return nil
 }
@@ -122,21 +207,6 @@ func CreateKoinlyCSV(records []*PhoenixRecord, w io.Writer, addCost bool) error 
 	writer := csv.NewWriter(w)
 	defer writer.Flush() // Ensure all buffered writes are committed to the underlying writer.
 
-	// Define the header for the Koinly CSV file.
-	koinlyHeader := []string{
-		"Date",
-		"Sent Amount",
-		"Sent Currency",
-		"Received Amount",
-		"Received Currency",
-		"Fee Amount",
-		"Fee Currency",
-		"Net Worth Amount",
-		"Net Worth Currency",
-		"Label",
-		"Description",
-		"TxHash",
-	}
 	if err := writer.Write(koinlyHeader); err != nil {
 		return err
 	}
@@ -167,6 +237,371 @@ func CreateKoinlyCSV(records []*PhoenixRecord, w io.Writer, addCost bool) error 
 		}
 	}
 	return nil
+}
+
+// ReadXapoCSV reads a Xapo statement using its column headings rather than
+// fixed positions. This permits account and interest exports to be combined
+// even if Xapo changes column order or adds unused columns.
+func ReadXapoCSV(r io.Reader) ([]*XapoRecord, error) {
+	return ReadXapoCSVWithSource(r, "")
+}
+
+// ReadXapoCSVWithSource reads a Xapo CSV and records the original statement
+// name and statement kind on every parsed row.
+func ReadXapoCSVWithSource(r io.Reader, statementName string) ([]*XapoRecord, error) {
+	reader := csv.NewReader(r)
+	reader.FieldsPerRecord = -1
+	header, err := reader.Read()
+	if err != nil {
+		return nil, err
+	}
+
+	columns := make(map[string]int, len(header))
+	for i, value := range header {
+		columns[normalizeXapoHeader(value)] = i
+	}
+
+	dateColumn, ok := findXapoColumn(columns, "transactiondatetime", "processingdatetime")
+	if !ok {
+		return nil, fmt.Errorf("missing Transaction Date/Time or Processing Date/Time column")
+	}
+	actionColumn, ok := findXapoColumn(columns, "actiontaken")
+	if !ok {
+		return nil, fmt.Errorf("missing Action Taken column")
+	}
+
+	var records []*XapoRecord
+	for line := 2; ; line++ {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading row %d: %w", line, err)
+		}
+		record, err := parseXapoRecord(row, columns, dateColumn, actionColumn)
+		if err != nil {
+			return nil, fmt.Errorf("parsing row %d: %w", line, err)
+		}
+		record.StatementName = statementName
+		record.StatementKind = xapoStatementKind(statementName)
+		records = append(records, record)
+	}
+	return records, nil
+}
+
+func parseXapoRecord(row []string, columns map[string]int, dateColumn, actionColumn int) (*XapoRecord, error) {
+	timestamp, err := parseXapoTimestamp(xapoValue(row, dateColumn))
+	if err != nil {
+		return nil, fmt.Errorf("invalid transaction date %q: %w", xapoValue(row, dateColumn), err)
+	}
+
+	record := &XapoRecord{
+		Timestamp:      timestamp,
+		Action:         xapoValue(row, actionColumn),
+		Currency:       strings.ToUpper(xapoValue(row, xapoColumn(columns, "currency"))),
+		Counterparty:   xapoValue(row, xapoColumn(columns, "counterparty")),
+		SubDescription: xapoValue(row, xapoColumn(columns, "subdescription")),
+	}
+	if record.Action == "" {
+		return nil, fmt.Errorf("empty Action Taken")
+	}
+
+	var parseErr error
+	if record.Amount, record.HasAmount, parseErr = parseOptionalXapoNumber(xapoValue(row, xapoColumn(columns, "amount"))); parseErr != nil {
+		return nil, fmt.Errorf("invalid Amount: %w", parseErr)
+	}
+	if record.USDAmount, record.HasUSDAmount, parseErr = parseOptionalXapoNumber(xapoValue(row, xapoColumn(columns, "usdamount"))); parseErr != nil {
+		return nil, fmt.Errorf("invalid USD Amount: %w", parseErr)
+	}
+	if record.BTCSpotFX, record.HasBTCSpotFX, parseErr = parseOptionalXapoNumber(xapoValue(row, xapoColumn(columns, "btcspotfx"))); parseErr != nil {
+		return nil, fmt.Errorf("invalid BTC Spot/FX: %w", parseErr)
+	}
+	return record, nil
+}
+
+// CreateXapoKoinlyCSV writes the consolidated output for Xapo statements.
+func CreateXapoKoinlyCSV(records []*XapoRecord, w io.Writer) error {
+	writer := csv.NewWriter(w)
+	defer writer.Flush()
+
+	if err := writer.Write(koinlyHeader); err != nil {
+		return err
+	}
+	for _, record := range ToXapoKoinlyRecords(records) {
+		if err := writer.Write(record.ToStringSlice()); err != nil {
+			return err
+		}
+	}
+	return writer.Error()
+}
+
+// ToXapoKoinlyRecords maps Xapo statement rows into Koinly rows. Xapo exchanges
+// appear twice (a BTC-account leg and a USD-account leg), so matching legs are
+// merged into one trade before the remaining rows are mapped.
+func ToXapoKoinlyRecords(records []*XapoRecord) []*KoinlyRecord {
+	groups := make(map[string][]int)
+	for i, record := range records {
+		if isXapoExchange(record) {
+			groups[xapoExchangeKey(record)] = append(groups[xapoExchangeKey(record)], i)
+		}
+	}
+
+	matched := make(map[int]bool)
+	var output []*KoinlyRecord
+	for _, indexes := range groups {
+		exchange, exchangeIndexes := xapoExchangeTrade(records, indexes)
+		if exchange == nil {
+			continue
+		}
+		output = append(output, exchange)
+		for _, index := range exchangeIndexes {
+			matched[index] = true
+		}
+	}
+
+	for i, record := range records {
+		if matched[i] {
+			continue
+		}
+		if koinlyRecord := ToXapoKoinlyRecord(record); koinlyRecord != nil {
+			output = append(output, koinlyRecord)
+		}
+	}
+
+	sort.SliceStable(output, func(i, j int) bool {
+		return output[i].Date < output[j].Date
+	})
+	return output
+}
+
+// ToXapoKoinlyRecord maps a standalone Xapo statement row into Koinly.
+func ToXapoKoinlyRecord(record *XapoRecord) *KoinlyRecord {
+	action := strings.ToLower(record.Action)
+	koinlyRecord := &KoinlyRecord{
+		Date:        record.Timestamp.Format(KoinlyDateFormat),
+		Description: xapoDescription(record),
+	}
+
+	if strings.Contains(action, "daily btc interest") && record.HasAmount {
+		koinlyRecord.ReceivedAmount = formatXapoAmount(math.Abs(record.Amount), "BTC")
+		koinlyRecord.ReceivedCurrency = "BTC"
+		koinlyRecord.Label = "lending interest"
+		return koinlyRecord
+	}
+	if strings.Contains(action, "move to savings") {
+		// Only the USD-account statement identifies this as a USD-to-BTC
+		// conversion. The same-shaped BTC-account row is an internal movement,
+		// and an unnamed source cannot be safely classified.
+		if record.StatementKind == XapoUSDAccountStatement &&
+			strings.EqualFold(record.Currency, "BTC") && record.HasAmount && record.Amount != 0 &&
+			record.HasUSDAmount && record.USDAmount != 0 {
+			koinlyRecord.SentAmount = formatXapoAmount(math.Abs(record.USDAmount), "USD")
+			koinlyRecord.SentCurrency = "USD"
+			koinlyRecord.ReceivedAmount = formatXapoAmount(math.Abs(record.Amount), "BTC")
+			koinlyRecord.ReceivedCurrency = "BTC"
+			return koinlyRecord
+		}
+		return nil
+	}
+	currency, amount, ok := xapoMovementAmount(record)
+	if !ok {
+		LogVerbose("Skipping Xapo row with no recognised amount: %+v", record)
+		return nil
+	}
+
+	if strings.Contains(action, "subscription fee") || strings.HasSuffix(action, " fee") {
+		koinlyRecord.FeeAmount = formatXapoAmount(math.Abs(amount), currency)
+		koinlyRecord.FeeCurrency = currency
+		koinlyRecord.Label = "cost"
+		return koinlyRecord
+	}
+	if isXapoCardTransaction(action) && amount < 0 {
+		setXapoMovement(koinlyRecord, amount, currency, "payment")
+		return koinlyRecord
+	}
+	if strings.Contains(action, "transfer to") {
+		setXapoMovement(koinlyRecord, amount, currency, "withdrawal")
+		return koinlyRecord
+	}
+	if strings.Contains(action, "received") || action == "transaction" {
+		setXapoMovement(koinlyRecord, amount, currency, "deposit")
+		return koinlyRecord
+	}
+
+	setXapoMovement(koinlyRecord, amount, currency, "")
+	return koinlyRecord
+}
+
+func setXapoMovement(record *KoinlyRecord, amount float64, currency, label string) {
+	record.Label = label
+	if amount >= 0 {
+		record.ReceivedAmount = formatXapoAmount(amount, currency)
+		record.ReceivedCurrency = currency
+		return
+	}
+	record.SentAmount = formatXapoAmount(math.Abs(amount), currency)
+	record.SentCurrency = currency
+}
+
+func xapoMovementAmount(record *XapoRecord) (string, float64, bool) {
+	if strings.EqualFold(record.Currency, "BTC") && record.HasAmount {
+		return "BTC", record.Amount, true
+	}
+	if record.HasUSDAmount {
+		return "USD", record.USDAmount, true
+	}
+	return "", 0, false
+}
+
+func xapoExchangeTrade(records []*XapoRecord, indexes []int) (*KoinlyRecord, []int) {
+	if len(indexes) == 0 {
+		return nil, nil
+	}
+
+	action := strings.ToLower(strings.TrimSpace(records[indexes[0]].Action))
+	btcIndex, usdIndex := -1, -1
+	for _, index := range indexes {
+		record := records[index]
+		switch action {
+		case "exchange usd to btc":
+			if record.HasAmount && record.Currency == "BTC" && record.Amount > 0 {
+				btcIndex = index
+			}
+			if record.HasUSDAmount && record.USDAmount < 0 {
+				usdIndex = index
+			}
+		case "exchange btc to usd":
+			if record.HasAmount && record.Currency == "BTC" && record.Amount < 0 {
+				btcIndex = index
+			}
+			if record.HasUSDAmount && record.USDAmount > 0 {
+				usdIndex = index
+			}
+		}
+	}
+	if btcIndex == -1 || usdIndex == -1 {
+		return nil, nil
+	}
+
+	btc := records[btcIndex]
+	usd := records[usdIndex]
+	trade := &KoinlyRecord{
+		Date:        btc.Timestamp.Format(KoinlyDateFormat),
+		Description: xapoDescription(btc),
+	}
+	if action == "exchange usd to btc" {
+		trade.SentAmount = formatXapoAmount(math.Abs(usd.USDAmount), "USD")
+		trade.SentCurrency = "USD"
+		trade.ReceivedAmount = formatXapoAmount(math.Abs(btc.Amount), "BTC")
+		trade.ReceivedCurrency = "BTC"
+	} else {
+		trade.SentAmount = formatXapoAmount(math.Abs(btc.Amount), "BTC")
+		trade.SentCurrency = "BTC"
+		trade.ReceivedAmount = formatXapoAmount(math.Abs(usd.USDAmount), "USD")
+		trade.ReceivedCurrency = "USD"
+	}
+	return trade, []int{btcIndex, usdIndex}
+}
+
+func isXapoExchange(record *XapoRecord) bool {
+	action := strings.ToLower(strings.TrimSpace(record.Action))
+	return action == "exchange usd to btc" || action == "exchange btc to usd"
+}
+
+func isXapoCardTransaction(action string) bool {
+	return strings.Contains(action, "card") && strings.Contains(action, "transaction")
+}
+
+func xapoExchangeKey(record *XapoRecord) string {
+	return record.Timestamp.UTC().Format(time.RFC3339Nano) + "|" +
+		strings.ToLower(strings.TrimSpace(record.Action)) + "|" +
+		strings.ToLower(strings.TrimSpace(record.SubDescription))
+}
+
+func xapoDescription(record *XapoRecord) string {
+	parts := []string{"Xapo: " + record.Action}
+	if record.Counterparty != "" {
+		parts = append(parts, record.Counterparty)
+	}
+	if record.SubDescription != "" {
+		parts = append(parts, record.SubDescription)
+	}
+	return strings.Join(parts, " — ")
+}
+
+func xapoStatementKind(statementName string) XapoStatementKind {
+	name := normalizeXapoHeader(filepath.Base(statementName))
+	switch {
+	case strings.Contains(name, "usdaccount"):
+		return XapoUSDAccountStatement
+	case strings.Contains(name, "btcaccount"):
+		return XapoBTCAccountStatement
+	case strings.Contains(name, "btcinterest"):
+		return XapoBTCInterestStatement
+	default:
+		return XapoUnknownStatement
+	}
+}
+
+func formatXapoAmount(amount float64, currency string) string {
+	if currency == "BTC" {
+		return FormatBTC(amount * satsPerBTC)
+	}
+	return strconv.FormatFloat(amount, 'f', 8, 64)
+}
+
+func normalizeXapoHeader(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return -1
+	}, value)
+}
+
+func findXapoColumn(columns map[string]int, names ...string) (int, bool) {
+	for _, name := range names {
+		if index, ok := columns[name]; ok {
+			return index, true
+		}
+	}
+	return 0, false
+}
+
+func xapoColumn(columns map[string]int, name string) int {
+	if index, ok := columns[name]; ok {
+		return index
+	}
+	return -1
+}
+
+func xapoValue(row []string, index int) string {
+	if index < 0 || index >= len(row) {
+		return ""
+	}
+	return strings.TrimSpace(row[index])
+}
+
+func parseOptionalXapoNumber(value string) (float64, bool, error) {
+	if value == "" {
+		return 0, false, nil
+	}
+	parsed, err := strconv.ParseFloat(strings.ReplaceAll(value, ",", ""), 64)
+	if err != nil {
+		return 0, false, err
+	}
+	return parsed, true, nil
+}
+
+func parseXapoTimestamp(value string) (time.Time, error) {
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339, time.RFC3339Nano} {
+		if timestamp, err := time.Parse(layout, value); err == nil {
+			return timestamp.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported date format")
 }
 
 // ParsePhoenixRecord converts a slice of strings (a row from Phoenix CSV) into a PhoenixRecord struct.

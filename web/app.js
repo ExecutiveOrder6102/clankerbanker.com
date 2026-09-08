@@ -5,7 +5,7 @@ let wasmLoaded = false;
 WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject).then((result) => {
     go.run(result.instance);
     wasmLoaded = true;
-    showStatus("Ready for your Phoenix CSV.", "success");
+    showStatus("Ready for your CSV exports.", "success");
 }).catch(err => {
     console.error("Failed to load WASM:", err);
     showStatus("The converter could not load. Please reload the page or check your local build.", "error");
@@ -16,6 +16,17 @@ const fileInput = document.getElementById('file-input');
 const statusDiv = document.getElementById('status');
 const resultArea = document.getElementById('result-area');
 const downloadBtn = document.getElementById('download-btn');
+const xapoSource = document.getElementById('xapo-source');
+const roundingCheckbox = document.getElementById('rounding-checkbox');
+const uploadPrompt = document.getElementById('upload-prompt');
+
+let conversionVersion = 0;
+
+function clearResult() {
+    conversionVersion++;
+    resultArea.classList.add('hidden');
+    downloadBtn.onclick = null;
+}
 
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('keydown', (e) => {
@@ -38,53 +49,83 @@ dropZone.addEventListener('drop', (e) => {
     e.preventDefault();
     dropZone.classList.remove('dragover');
     if (e.dataTransfer.files.length) {
-        handleFile(e.dataTransfer.files[0]);
+        handleFiles(e.dataTransfer.files);
     }
 });
 
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length) {
-        handleFile(e.target.files[0]);
+        handleFiles(e.target.files);
     }
 });
 
-let conversionVersion = 0;
+document.querySelectorAll('input[name="source"]').forEach((input) => {
+    input.addEventListener('change', updateSourceControls);
+});
 
-function handleFile(file) {
-    const version = ++conversionVersion;
-    resultArea.classList.add('hidden');
-    downloadBtn.onclick = null;
+function updateSourceControls() {
+    clearResult();
+    fileInput.value = '';
+    if (wasmLoaded) showStatus('Ready for your CSV exports.', 'success');
+    const isXapo = xapoSource.checked;
+    dropZone.setAttribute('aria-label', isXapo ? 'Choose Xapo statement CSV files' : 'Choose a Phoenix Wallet CSV file');
+    fileInput.multiple = isXapo;
+    roundingCheckbox.disabled = isXapo;
+    uploadPrompt.innerHTML = isXapo
+        ? 'Drag & Drop your <strong>Xapo account and interest CSVs</strong> here'
+        : 'Drag & Drop your <strong>Phoenix CSV</strong> here';
+}
+
+async function handleFiles(files) {
+    clearResult();
+    const version = conversionVersion;
+    files = Array.from(files);
     if (!wasmLoaded) {
         showStatus("The converter is still loading. Please try again shortly.", "error");
         return;
     }
 
-    const reader = new FileReader();
-    showStatus("Reading and converting your CSV…", "");
-    reader.onload = async (e) => {
-        if (version !== conversionVersion) return;
-        const content = e.target.result;
-        const addRoundingCost = document.getElementById('rounding-checkbox').checked;
-        try {
-            const output = convertPhoenixToKoinly(content, addRoundingCost);
+    const isXapo = xapoSource.checked;
+    if (!isXapo && files.length !== 1) {
+        showStatus("Phoenix conversion accepts one CSV export at a time.", "error");
+        return;
+    }
 
-            if (output.startsWith("Error")) {
-                showStatus(output, "error");
-                resultArea.classList.add('hidden');
-            } else {
-                showStatus("Conversion successful!", "success");
-                setupDownload(output);
-            }
-        } catch (err) {
-            showStatus("Error during conversion: " + err, "error");
+    const addRoundingCost = roundingCheckbox.checked;
+    showStatus("Reading and converting your CSV exports…", "");
+    try {
+        const contents = await Promise.all(Array.from(files, readFileAsText));
+        if (version !== conversionVersion) return;
+        const output = isXapo
+            ? convertXapoToKoinly(Array.from(files, (file, index) => ({
+                name: file.name,
+                contents: contents[index],
+            })))
+            : convertPhoenixToKoinly(contents[0], addRoundingCost);
+
+        if (output.startsWith("Error")) {
+            showStatus(output, "error");
+            resultArea.classList.add('hidden');
+        } else {
+            const success = isXapo
+                ? `Consolidated ${files.length} Xapo statement${files.length === 1 ? '' : 's'} successfully!`
+                : "Conversion successful!";
+            showStatus(success, "success");
+            setupDownload(output);
         }
-    };
-    reader.onerror = () => {
-        if (version === conversionVersion) {
-            showStatus("Could not read the selected file. Please try again.", "error");
-        }
-    };
-    reader.readAsText(file);
+    } catch (err) {
+        if (version !== conversionVersion) return;
+        showStatus("Error during conversion: " + err, "error");
+    }
+}
+
+function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => reject(reader.error || new Error(`Could not read ${file.name}`));
+        reader.readAsText(file);
+    });
 }
 
 function showStatus(msg, type) {

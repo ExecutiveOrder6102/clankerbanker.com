@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>clankerbanker.com — CSV to Koinly</title>
-    <meta name="description" content="Open-source CSV conversion for Koinly. Convert locally in your browser, starting with Phoenix Wallet exports.">
+    <meta name="description" content="Open-source CSV conversion for Koinly. Convert locally in your browser, supporting Phoenix Wallet and Xapo exports.">
     <link rel="stylesheet" href="style.css">
     <script src="wasm_exec.js"></script>
     <script src="app.js" defer></script>
@@ -19,15 +19,21 @@
         </header>
 
         <main>
-            <p>Currently supported: <strong>Phoenix Wallet</strong>. More CSV formats are planned.</p>
+            <p>Currently supported: <strong>Phoenix Wallet and Xapo</strong>. More CSV formats are planned.</p>
             <div class="upload-area" id="drop-zone" role="button" tabindex="0" aria-label="Choose a Phoenix Wallet CSV file">
                 <input type="file" id="file-input" accept=".csv" hidden>
                 <div class="icon">📂</div>
-                <p>Drag & Drop your <strong>phoenix.csv</strong> here</p>
+                <p id="upload-prompt">Drag & Drop your <strong>Phoenix CSV</strong> here</p>
                 <p class="small">or click to browse</p>
             </div>
 
             <div class="options">
+                <div class="source-group" role="radiogroup" aria-label="Statement type">
+                    <input type="radio" id="phoenix-source" name="source" value="phoenix" checked>
+                    <label for="phoenix-source">Phoenix (one export)</label>
+                    <input type="radio" id="xapo-source" name="source" value="xapo">
+                    <label for="xapo-source">Xapo USD/BTC (select all account and interest exports)</label>
+                </div>
                 <div class="checkbox-group">
                     <input type="checkbox" id="rounding-checkbox">
                     <label for="rounding-checkbox">Adjust for rounding differences (adds a cost transaction)</label>
@@ -43,7 +49,7 @@
 
         <footer>
             <p>Runs locally. No data leaves your device.</p>
-            <p>Don't trust me? Good! Check the <a href="https://github.com/ExecutiveOrder6102/phoenix-koinly-converter"
+            <p>Don't trust me? Good! Check the <a href="https://github.com/ExecutiveOrder6102/clankerbanker.com"
                     target="_blank" rel="noopener noreferrer">repo</a> and run it yourself!</p>
         </footer>
     </div>

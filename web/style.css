@@ -72,6 +72,21 @@ header p {
     margin-bottom: 1.5rem;
     display: flex;
     justify-content: center;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.source-group {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.5rem 0.6rem;
+    align-items: center;
+    font-size: 0.9rem;
+}
+
+.source-group input,
+.checkbox-group input {
+    accent-color: var(--accent-color);
 }
 
 .checkbox-group {
