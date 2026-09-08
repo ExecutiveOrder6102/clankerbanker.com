@@ -1,13 +1,22 @@
-.PHONY: all build-cli build-wasm clean
+.PHONY: all build build-wasm serve test clean
 
-all: build-cli build-wasm
+all: build
 
-build-cli:
-	go build -o phoenix-koinly-converter main.go
+build: build-wasm
 
 build-wasm:
-	cp $$(find $$(go env GOROOT) -name wasm_exec.js | head -n 1) web/
-	GOOS=js GOARCH=wasm go build -o web/main.wasm cmd/wasm/main.go
+	@runtime="$$(go env GOROOT)/lib/wasm/wasm_exec.js"; \
+	if [ ! -f "$$runtime" ]; then \
+		runtime="$$(go env GOROOT)/misc/wasm/wasm_exec.js"; \
+	fi; \
+	cp "$$runtime" web/wasm_exec.js
+	GOOS=js GOARCH=wasm go build -o web/main.wasm ./cmd/wasm
+
+serve: build
+	python3 -m http.server 8000 --bind 127.0.0.1 --directory web
+
+test:
+	go test ./...
 
 clean:
-	rm -f phoenix-koinly-converter web/main.wasm koinly.csv
+	rm -f web/main.wasm web/wasm_exec.js

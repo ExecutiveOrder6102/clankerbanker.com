@@ -19,6 +19,7 @@ body {
 }
 
 .container {
+    box-sizing: border-box;
     background-color: var(--card-bg);
     padding: 2rem;
     border-radius: 12px;
@@ -47,7 +48,7 @@ header p {
     transition: all 0.2s ease;
 }
 
-.upload-area:hover, .upload-area.dragover {
+.upload-area:hover, .upload-area.dragover, .upload-area:focus-visible {
     border-color: var(--accent-color);
     background-color: rgba(247, 147, 26, 0.05);
 }
@@ -73,14 +74,14 @@ header p {
     justify-content: center;
 }
 
-.checkbox-container {
+.checkbox-group {
     display: flex;
     align-items: center;
     cursor: pointer;
     font-size: 0.9rem;
 }
 
-.checkbox-container input {
+.checkbox-group input {
     margin-right: 0.5rem;
     accent-color: var(--accent-color);
 }
@@ -121,5 +122,7 @@ header p {
 footer {
     margin-top: 2rem;
     font-size: 0.8rem;
-    color: #666;
+    color: #aaa;
 }
+
+footer a { color: var(--accent-color); }

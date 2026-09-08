@@ -5,10 +5,10 @@ let wasmLoaded = false;
 WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject).then((result) => {
     go.run(result.instance);
     wasmLoaded = true;
-    console.log("WASM Loaded");
+    showStatus("Ready for your Phoenix CSV.", "success");
 }).catch(err => {
     console.error("Failed to load WASM:", err);
-    showStatus("Failed to load WASM core. Please ensure main.wasm is present.", "error");
+    showStatus("The converter could not load. Please reload the page or check your local build.", "error");
 });
 
 const dropZone = document.getElementById('drop-zone');
@@ -18,6 +18,12 @@ const resultArea = document.getElementById('result-area');
 const downloadBtn = document.getElementById('download-btn');
 
 dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+    }
+});
 
 dropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -42,14 +48,21 @@ fileInput.addEventListener('change', (e) => {
     }
 });
 
+let conversionVersion = 0;
+
 function handleFile(file) {
+    const version = ++conversionVersion;
+    resultArea.classList.add('hidden');
+    downloadBtn.onclick = null;
     if (!wasmLoaded) {
-        showStatus("WASM not loaded yet. Please wait...", "error");
+        showStatus("The converter is still loading. Please try again shortly.", "error");
         return;
     }
 
     const reader = new FileReader();
+    showStatus("Reading and converting your CSV…", "");
     reader.onload = async (e) => {
+        if (version !== conversionVersion) return;
         const content = e.target.result;
         const addRoundingCost = document.getElementById('rounding-checkbox').checked;
         try {
@@ -64,6 +77,11 @@ function handleFile(file) {
             }
         } catch (err) {
             showStatus("Error during conversion: " + err, "error");
+        }
+    };
+    reader.onerror = () => {
+        if (version === conversionVersion) {
+            showStatus("Could not read the selected file. Please try again.", "error");
         }
     };
     reader.readAsText(file);

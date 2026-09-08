@@ -1,8 +1,9 @@
-name: Go Tests
+name: Test and Build Web App
 
 on:
-  pull_request:
+  push:
     branches: [main]
+  pull_request:
 
 permissions:
   contents: read
@@ -18,3 +19,5 @@ jobs:
         go-version-file: 'go.mod'
     - name: Run tests
       run: go test ./...
+    - name: Build browser bundle
+      run: make build

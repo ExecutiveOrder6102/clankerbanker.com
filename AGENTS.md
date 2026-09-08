@@ -1,20 +1,21 @@
 # Agent Guidelines
 
-This repository contains a Go utility for converting Phoenix Bitcoin Lightning wallet CSV exports into a format compatible with Koinly. It now ships both a CLI binary and a WebAssembly-powered browser interface.
+This repository is clankerbanker.com, a web-only app for converting CSV exports into Koinly reports. The conversion engine is Go compiled to WebAssembly; the UI is plain HTML, CSS, and JavaScript. Phoenix Wallet is currently the supported source format.
 
 ## Coding Guidelines
-- Format all Go files using `gofmt -w` before committing.
-- Keep functions small and focused. Prefer straightforward loops and clear variable names.
-- Use the existing structs and helper functions when extending functionality.
-- When adding or changing WebAssembly or web UI behavior, update the `web/` docs (typically the README) so users know how to build and serve the static bundle.
+- Format Go files using `gofmt -w` before committing.
+- Keep functions small and focused, with straightforward loops and clear variable names.
+- Reuse the existing conversion structs and helpers when extending functionality.
+- Keep conversion entirely client-side and retain the ability to run locally.
+- Update `web/README.md` when changing web behavior or build/serve instructions.
 
 ## Testing Guidelines
-- Always run `go test ./...` before committing changes. All tests must pass.
-- If you add new dependencies, run `go mod tidy` to update `go.mod` and `go.sum`.
+- Run `go test ./...` and `make build` before committing. All checks must pass.
+- Preserve regression coverage when adding or changing CSV formats.
+- If adding Go dependencies, run `go mod tidy`.
 
 ## Repository Structure
-- `main.go` contains the conversion logic and CLI.
-- `main_test.go` contains unit tests for parsing and conversion.
-- `testdata/` holds sample CSV files used in tests.
-
-Follow these guidelines to maintain code consistency and reliability.
+- `converter/` contains conversion logic and Go unit tests.
+- `cmd/wasm/main.go` exposes the converter to the browser.
+- `web/` contains the static browser interface.
+- `testdata/` contains synthetic CSV fixtures.

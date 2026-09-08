@@ -1,6 +1,9 @@
 /main.wasm
   Content-Type: application/wasm
-  Cache-Control: public, max-age=31536000, immutable
+  Cache-Control: no-cache
+
+/wasm_exec.js
+  Cache-Control: no-cache
 
 /*
   X-Frame-Options: DENY

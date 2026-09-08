@@ -1,75 +1,62 @@
-# Phoenix Koinly Converter
+# clankerbanker.com
 
-This project converts transaction data exported from the Phoenix Bitcoin Lightning wallet into a CSV format compatible with Koinly, cryptocurrency tax software. It includes both a traditional command-line workflow and an in-browser experience powered by WebAssembly.
+An open-source web app for turning wallet and other custom CSV exports into Koinly-compatible reports. Phoenix Wallet is the first supported format; more converters can be added over time.
 
-## Features
+Conversion runs entirely in your browser using Go compiled to WebAssembly. Files are processed on your device, with no upload service or account required. The app can be built, inspected, and hosted locally. There is no CLI converter.
 
-- Converts Phoenix transaction types (lightning_received, lightning_sent, swap_in, swap_out, channel_open, channel_close) into Koinly-compatible records.
-- Handles amount conversions from millisats to BTC.
-- CLI mode for converting CSV exports on your machine.
-- In-browser converter (WASM) that runs entirely client-side with drag-and-drop upload and a downloadable `koinly.csv` output.
-- Verbose logging flag for additional insight when debugging CLI runs.
+## Run locally
 
-## Usage
+Install Go (the required version is in `go.mod`), Make, and Python 3, then run:
 
-### Command-line converter
-
-Provide the path to your Phoenix CSV export file as a command-line argument. The converter writes a `koinly.csv` file to the current working directory.
-
-```bash
-go run main.go <path_to_phoenix_csv_file>
+```sh
+make serve
 ```
 
-**Verbose mode example:**
+Open [localhost:8000](http://localhost:8000), choose or drop a Phoenix CSV export, and download `koinly.csv` for import into Koinly. Stop the server with Ctrl+C.
 
-```bash
-go run main.go -v phoenix_transactions.csv
+To build and serve separately:
+
+```sh
+make build
+python3 -m http.server 8000 --bind 127.0.0.1 --directory web
 ```
 
-This generates `koinly.csv`, which you can import into Koinly.
+The build creates `web/main.wasm` and copies the matching Go runtime into `web/wasm_exec.js`. Both are generated files. Rebuild after changes to Go code or the Go toolchain. No JavaScript package installation is required.
 
-### In-browser converter (WASM)
+## Supported Phoenix transactions
 
-The `web/` directory contains a drag-and-drop interface that converts Phoenix exports entirely in your browser. Build the WebAssembly bundle and serve the static files locally:
+| Phoenix type | Koinly mapping |
+| --- | --- |
+| `lightning_received` | Received BTC, `lightning` label |
+| `lightning_sent` | Sent BTC, `lightning` label |
+| `swap_in`, `legacy_swap_in` | Received BTC, `transfer` label |
+| `swap_out` | Sent BTC, `transfer` label |
+| `channel_open`, `legacy_pay_to_open` | Received BTC, `deposit` label |
+| `channel_close` | BTC fee, `cost` label |
 
-```bash
-make build-wasm
-cd web
-python -m http.server 8000
+Amounts are converted from millisats to BTC with eight decimal places. The optional rounding adjustment adds a cost transaction when accumulated rounding differences reach a whole satoshi after rounding. This entry is dated at conversion time.
+
+Existing conversion behavior is retained: invalid timestamps are skipped, invalid integer fields become zero, and unknown transaction types produce incomplete rows and a console warning. Review the resulting report before import. The converter expects the Phoenix column layout, not arbitrary CSVs.
+
+## Development and testing
+
+```sh
+make test     # Go converter tests, including the original regression tests
+make build    # Compile and validate the browser entry point
+make clean    # Remove generated browser binaries/runtime
 ```
 
-Open http://localhost:8000 in your browser, drop your Phoenix CSV export, and download the generated `koinly.csv` file. No data leaves your device.
+GitHub Actions runs the Go tests and WebAssembly build on pull requests and pushes to `main`.
 
-### Verbose Logging
+- `converter/`: shared conversion logic and tests.
+- `cmd/wasm/main.go`: browser bindings for the conversion engine.
+- `web/`: static interface, styles, and generated browser bundle.
+- `testdata/`: synthetic CSV fixtures.
 
-To enable verbose logging for detailed debugging output, use the `-v` flag:
+To add another CSV format, implement a parser and Koinly mapping in Go, add fixture-based tests, expose it through the WebAssembly entry point, and add format selection to the web interface. Keep all file processing in the browser.
 
-```bash
-go run main.go -v <path_to_phoenix_csv_file>
-```
+See [web/README.md](web/README.md) for static hosting instructions. The repository link and Go module path retain their current GitHub location until the repository itself is renamed; neither is the website's domain configuration.
 
-## Building from Source
+## License
 
-Use the provided `Makefile` to build the CLI binary and the WASM bundle.
-
-```bash
-make build-cli   # Builds the CLI binary at ./phoenix-koinly-converter
-make build-wasm  # Produces web/main.wasm and copies wasm_exec.js into web/
-```
-
-Then you can run the executable:
-
-```bash
-./phoenix-koinly-converter <path_to_phoenix_csv_file>
-```
-
-## Supported Phoenix Transaction Types
-
-- `lightning_received`: Treated as received BTC.
-- `lightning_sent`: Treated as sent BTC.
-- `swap_in` / `legacy_swap_in`: Treated as received BTC (transfers).
-- `swap_out`: Treated as sent BTC (transfers).
-- `channel_open` / `legacy_pay_to_open`: Treated as received BTC (deposits).
-- `channel_close`: Treated as a fee/cost in BTC.
-
-Any other transaction types will be logged as unknown and may not be fully converted.
+[BSD 3-Clause](LICENSE).
