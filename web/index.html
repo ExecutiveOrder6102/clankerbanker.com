@@ -1,58 +1,111 @@
 <!DOCTYPE html>
 <html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>clankerbanker.com — CSV to Koinly</title>
-    <meta name="description" content="Open-source CSV conversion for Koinly. Convert locally in your browser, supporting Phoenix Wallet and Xapo exports.">
-    <link rel="stylesheet" href="style.css">
-    <script src="wasm_exec.js"></script>
-    <script src="app.js" defer></script>
-</head>
-
-<body>
-    <div class="container">
-        <header>
-            <h1>clankerbanker.com</h1>
-            <p>Your CSV exports, ready for Koinly. Open source and processed entirely in your browser.</p>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>clankerbanker.com — CSV to Koinly</title>
+        <meta name="description" content="Open-source CSV conversion for Koinly. Convert locally in your browser, supporting Phoenix Wallet and Xapo exports.">
+        <link rel="stylesheet" href="style.css">
+        <script src="wasm_exec.js"></script>
+        <script src="app.js" defer></script>
+    </head>
+    <body>
+        <div class="city" aria-hidden="true"></div>
+        <header class="topbar">
+            <a class="brand" href="./">
+                <span class="brand-mark">₿</span>
+                <span>
+                    clankerbanker<em>.com</em>
+                </span>
+            </a>
+            <nav class="nav-links">
+                <a href="https://github.com/ExecutiveOrder6102/clankerbanker.com" target="_blank" rel="noopener noreferrer">Source code ↗</a>
+            </nav>
         </header>
-
-        <main>
-            <p>Currently supported: <strong>Phoenix Wallet and Xapo</strong>. More CSV formats are planned.</p>
-            <div class="upload-area" id="drop-zone" role="button" tabindex="0" aria-label="Choose a Phoenix Wallet CSV file">
-                <input type="file" id="file-input" accept=".csv" hidden>
-                <div class="icon">📂</div>
-                <p id="upload-prompt">Drag & Drop your <strong>Phoenix CSV</strong> here</p>
-                <p class="small">or click to browse</p>
+        <main class="night-main">
+            <div class="intro">
+                <p class="eyebrow">YOUR BOOKS. YOUR BUSINESS.</p>
+                <h1>
+                    Clean exports.
+                    <br>
+                    <span>Clear head.</span>
+                </h1>
+                <p>Wallet and bank CSVs, ready for Koinly.</p>
             </div>
-
-            <div class="options">
-                <div class="source-group" role="radiogroup" aria-label="Statement type">
-                    <input type="radio" id="phoenix-source" name="source" value="phoenix" checked>
-                    <label for="phoenix-source">Phoenix (one export)</label>
-                    <input type="radio" id="xapo-source" name="source" value="xapo">
-                    <label for="xapo-source">Xapo USD/BTC (select all account and interest exports)</label>
+            <section class="converter" aria-label="CSV converter">
+                <div class="panel-top">
+                    <span class="panel-title">The conversion desk</span>
+                    <span class="privacy-pill">
+                        <span class="dot"></span>
+                        100% on your device
+                    </span>
                 </div>
-                <div class="checkbox-group">
-                    <input type="checkbox" id="rounding-checkbox">
-                    <label for="rounding-checkbox">Adjust for rounding differences (adds a cost transaction)</label>
+                <div class="panel-content">
+                    <div class="source-heading">
+                        <span class="step-label">
+                            <b>01</b>
+                            Choose your source
+                        </span>
+                        <span id="source-count" class="count"></span>
+                    </div>
+                    <label class="search">
+                        <span aria-hidden="true">⌕</span>
+                        <input id="source-search" type="search" placeholder="Find a wallet or bank…" aria-label="Search sources">
+                    </label>
+                    <div id="source-list" class="source-list"></div>
+                    <p id="no-sources" class="no-sources" hidden>No matching sources. Try another wallet or bank name.</p>
+                    <div class="divider"></div>
+                    <div class="work-heading">
+                        <span class="step-label">
+                            <b>02</b>
+                            Add your exports
+                        </span>
+                        <span class="output">CSV → Koinly</span>
+                    </div>
+                    <input type="file" id="file-input" accept=".csv" hidden>
+                    <button type="button" id="drop-zone" class="drop-zone">
+                        <svg class="upload-icon" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                            <path d="M13 26H8a5 5 0 0 1-1-10 12 12 0 0 1 23-2 6 6 0 0 1 2 12h-5M20 33V18m-6 6 6-6 6 6"/>
+                        </svg>
+                        <strong id="drop-title">Drop your Phoenix CSV here</strong>
+                        <span class="browse">
+                            or
+                            <span>browse files</span>
+                            on your device
+                        </span>
+                        <span class="drop-meta">.CSV FILES · PROCESSED LOCALLY</span>
+                    </button>
+                    <p id="source-help" class="source-help"></p>
+                    <ul id="file-list" class="file-list" aria-label="Selected files"></ul>
+                    <details id="rounding-options" class="options">
+                        <summary>Conversion options</summary>
+                        <label>
+                            <input type="checkbox" id="rounding">
+                            Adjust rounding differences by adding a cost transaction
+                        </label>
+                    </details>
+                    <button type="button" id="convert" class="primary" disabled>
+                        <span>Convert to Koinly</span>
+                        <span aria-hidden="true">↗</span>
+                    </button>
+                    <p id="status" class="status" role="status" aria-live="polite">Loading local converter…</p>
+                    <div id="result" class="result" hidden>
+                        <a id="download" download="koinly.csv">Download koinly.csv ↓</a>
+                        <p>Ready to import into Koinly.</p>
+                    </div>
                 </div>
-            </div>
-
-            <div id="status" class="status" role="status" aria-live="polite">Loading converter…</div>
-
-            <div id="result-area" class="hidden">
-                <button id="download-btn" class="primary-btn">Download koinly.csv</button>
-            </div>
+                <div class="panel-bottom">
+                    <span class="engine">
+                        <span class="dot"></span>
+                        <span id="engine-state">Loading local converter</span>
+                    </span>
+                    <span id="selected-source" class="selected-source">Phoenix Wallet</span>
+                </div>
+            </section>
+            <footer class="night-footer">
+                <p>Your files stay yours. No uploads. No account.</p>
+                <span class="mono">OPEN SOURCE / BITCOIN BUILT</span>
+            </footer>
         </main>
-
-        <footer>
-            <p>Runs locally. No data leaves your device.</p>
-            <p>Don't trust me? Good! Check the <a href="https://github.com/ExecutiveOrder6102/clankerbanker.com"
-                    target="_blank" rel="noopener noreferrer">repo</a> and run it yourself!</p>
-        </footer>
-    </div>
-</body>
-
+    </body>
 </html>
